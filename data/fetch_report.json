@@ -1,0 +1,10 @@
+{
+ "selected": 5000,
+ "attempted": 695,
+ "ok": 695,
+ "failed": 0,
+ "fails": [],
+ "raw_files": 6195,
+ "raw_bytes": 412705392,
+ "elapsed_sec": 799.0
+}
