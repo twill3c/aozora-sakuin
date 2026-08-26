@@ -1,0 +1,21 @@
+# --- 一次データ(再取得できる) ---
+# 青空文庫から取得した本文。pipeline/fetch_bronze.py で再取得(約 70 分)
+data/raw/
+# 正規化した本文。pipeline/normalize.py で再生成(15 秒)
+data/normalized/
+
+# --- 配信物(再構築できる) ---
+# 索引シャード 228 枚・232.9 MB。build_shards で再構築(27 秒)。
+# 再構築のたびに 228 ファイル全部が変わるため、履歴に入れると毎回 233 MB 積み上がる
+web/index/
+# lib をここへ複製している。scripts/verify.py が配置する
+web/wasm/
+
+# --- 中間生成物 ---
+build/
+target/
+out/
+__pycache__/
+*.pyc
+.pytest_cache/
+.vercel/
