@@ -22,13 +22,15 @@
 //!   前文脈 + 一致部 + 後文脈 (UTF-8)
 //! ```
 
-use crate::shard::Shard;
+use crate::shard::{PartialShard, Shard};
 use crate::variants::expand;
 
 /// 読み込んだシャード。wasm は単一スレッドなので `static mut` で足りる
 static mut SHARDS: Vec<Option<Shard>> = Vec::new();
 /// 結果の詰め先
 static mut OUT: Vec<u8> = Vec::new();
+/// 常駐領域だけを読んだシャード。計数はこちらで足りる
+static mut PARTIALS: Vec<Option<PartialShard>> = Vec::new();
 
 /// # Safety
 /// 返した領域は `az_free` で同じ長さを渡して解放すること。
@@ -221,6 +223,117 @@ pub unsafe extern "C" fn az_variants(pat: *const u8, pat_len: u32, risky: u32) -
         OUT.extend_from_slice(f.as_bytes());
     }
     forms.len() as i32
+}
+
+// ---------------------------------------------------------------- 部分読み
+//
+// 索引を丸ごと落とすと 232.9 MB になる。計数に要るのはワードの一部だけなので、
+// 常駐領域(索引全体の 5.6%)を読んでおき、足りないバイトを都度取りに行く。
+// 実測では 1 クエリあたりの追加転送は 0.13〜0.51 MB。
+
+/// 常駐領域だけを読み込み、取っ手を返す。読めなければ -1。
+///
+/// # Safety
+/// `ptr` から `len` バイトが有効であること。
+#[no_mangle]
+pub unsafe extern "C" fn az_resident_load(ptr: *const u8, len: u32) -> i32 {
+    if ptr.is_null() {
+        return -1;
+    }
+    let buf = core::slice::from_raw_parts(ptr, len as usize);
+    match PartialShard::from_resident(buf) {
+        Ok(s) => {
+            let slot = PARTIALS.iter().position(|x| x.is_none());
+            match slot {
+                Some(i) => {
+                    PARTIALS[i] = Some(s);
+                    i as i32
+                }
+                None => {
+                    PARTIALS.push(Some(s));
+                    (PARTIALS.len() - 1) as i32
+                }
+            }
+        }
+        Err(_) => -1,
+    }
+}
+
+/// # Safety
+/// `h` は `az_resident_load` が返した取っ手であること。
+#[no_mangle]
+pub unsafe extern "C" fn az_resident_drop(h: i32) {
+    if let Ok(i) = usize::try_from(h) {
+        if i < PARTIALS.len() {
+            PARTIALS[i] = None;
+        }
+    }
+}
+
+/// ヘッダから常駐領域の大きさを読む。読めなければ -1。
+/// JS は先にこれを引いて、必要な先頭バイト数だけ取りに行く。
+///
+/// # Safety
+/// `ptr` から `len` バイトが有効であること。
+#[no_mangle]
+pub unsafe extern "C" fn az_resident_len(ptr: *const u8, len: u32) -> i32 {
+    if ptr.is_null() {
+        return -1;
+    }
+    let buf = core::slice::from_raw_parts(ptr, len as usize);
+    PartialShard::resident_len(buf)
+        .map(|v| v as i32)
+        .unwrap_or(-1)
+}
+
+/// 語を数える。
+///
+/// - 0 以上 … 件数
+/// - -1 … 取っ手が無効
+/// - -2 … バイトが足りない。要る範囲を出力バッファに `u32 位置 / u32 長さ` の並びで詰めた
+///
+/// # Safety
+/// `pat` から `pat_len` バイトが有効であること。
+#[no_mangle]
+pub unsafe extern "C" fn az_resident_count(h: i32, pat: *const u8, pat_len: u32) -> i32 {
+    let Ok(i) = usize::try_from(h) else {
+        return -1;
+    };
+    let Some(Some(ps)) = PARTIALS.get(i) else {
+        return -1;
+    };
+    if pat.is_null() {
+        return -1;
+    }
+    let p = core::slice::from_raw_parts(pat, pat_len as usize);
+    match ps.try_count(p) {
+        Ok(n) => n as i32,
+        Err(ranges) => {
+            OUT.clear();
+            for r in ranges {
+                OUT.extend_from_slice(&r.at.to_le_bytes());
+                OUT.extend_from_slice(&r.len.to_le_bytes());
+            }
+            -2
+        }
+    }
+}
+
+/// ファイル位置 `at` から始まるバイト列を供給する。
+///
+/// # Safety
+/// `ptr` から `len` バイトが有効であること。
+#[no_mangle]
+pub unsafe extern "C" fn az_resident_supply(h: i32, at: u32, ptr: *const u8, len: u32) {
+    let Ok(i) = usize::try_from(h) else {
+        return;
+    };
+    if ptr.is_null() {
+        return;
+    }
+    if let Some(Some(ps)) = PARTIALS.get_mut(i) {
+        ps.supply(at, core::slice::from_raw_parts(ptr, len as usize));
+    }
 }
 
 /// 配信形式の版。JS 側が取得したファイルと照合できるように出しておく

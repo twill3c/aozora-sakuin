@@ -209,3 +209,76 @@ fn o_13e_境界越しに異体形を取り出せる() {
         assert!(az_out_len() > plain, "risky=1 で形が増えていない");
     }
 }
+
+#[test]
+fn o_13f_境界越しに部分読みで数えられる() {
+    let _g = SERIAL.lock().unwrap();
+    let a = "春はあけぼの。やうやう白くなりゆく山ぎは、すこしあかりて。";
+    let b = "秋は夕暮。烏の寝どころへ行くとて、飛びいそぐさへあはれなり。";
+    let text = format!("{a}{b}");
+    let bytes_text = text.as_bytes();
+    let bytes = Shard::build(
+        bytes_text,
+        vec![
+            Doc { id: 11, offset: 0 },
+            Doc {
+                id: 22,
+                offset: a.len() as u32,
+            },
+        ],
+    )
+    .to_bytes();
+
+    unsafe {
+        // ヘッダだけ渡して常駐領域の大きさを聞く
+        let hp = az_alloc(64);
+        core::ptr::copy_nonoverlapping(bytes.as_ptr(), hp, 64);
+        let resident = az_resident_len(hp, 64);
+        az_free(hp, 64);
+        assert!(resident > 0, "常駐領域の大きさを読めない");
+        let resident = resident as usize;
+        assert!(resident < bytes.len(), "常駐領域が索引全体と同じ");
+
+        // 常駐領域だけ渡して組む
+        let rp = az_alloc(resident as u32);
+        core::ptr::copy_nonoverlapping(bytes.as_ptr(), rp, resident);
+        let h = az_resident_load(rp, resident as u32);
+        assert!(h >= 0, "常駐領域から組めない");
+
+        for pat in ["は", "あけぼの", "あはれ", "ゐ"] {
+            let p = pat.as_bytes();
+            let want = find_all_naive(bytes_text, p).len();
+            let mut rounds = 0;
+            let got = loop {
+                let r = az_resident_count(h, p.as_ptr(), p.len() as u32);
+                if r >= 0 {
+                    break r as usize;
+                }
+                assert_eq!(r, -2, "pat={pat} で異常な戻り値 {r}");
+                rounds += 1;
+                assert!(rounds < 500, "pat={pat} が収束しない");
+                // 要求された範囲を供給する
+                let out = core::slice::from_raw_parts(az_out_ptr(), az_out_len() as usize).to_vec();
+                assert!(!out.is_empty(), "足りないのに要求が空");
+                for rec in out.chunks_exact(8) {
+                    let at = u32::from_le_bytes(rec[0..4].try_into().unwrap());
+                    let len = u32::from_le_bytes(rec[4..8].try_into().unwrap());
+                    let s = at as usize;
+                    let e = (s + len as usize).min(bytes.len());
+                    let bp = az_alloc((e - s) as u32);
+                    core::ptr::copy_nonoverlapping(bytes[s..e].as_ptr(), bp, e - s);
+                    az_resident_supply(h, at, bp, (e - s) as u32);
+                    az_free(bp, (e - s) as u32);
+                }
+            };
+            assert_eq!(got, want, "pat={pat} の件数が総当たりと違う");
+        }
+        az_resident_drop(h);
+        az_free(rp, resident as u32);
+        assert_eq!(
+            az_resident_count(h, "は".as_bytes().as_ptr(), 3),
+            -1,
+            "解放後は使えない"
+        );
+    }
+}

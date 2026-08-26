@@ -24,6 +24,7 @@ let az = null;             // wasm の輸出
 let manifest = null;
 let meta = null;           // 作品台帳
 let kanaNames = [];
+const residents = [];      // シャードごとの取っ手(常駐領域)。初回に読んで使い回す
 
 const state = {
   query: "",
@@ -31,12 +32,11 @@ const state = {
   counts: new Map(),       // form -> 件数
   rows: [],                // 用例
   byWork: new Map(),       // 作品ID -> 件数
+  perShard: new Map(),     // シャード番号 -> {形: 件数}
   scanned: 0,
   bytes: 0,
   total: 0,
   running: false,
-  abort: false,
-  next: 0,                 // 次に走査するシャード
   facets: { kana: new Set(), genre: new Set() },
 };
 
@@ -111,60 +111,111 @@ function kwicIn(h, word, max) {
 }
 
 // ---------------------------------------------------------------- 走査
+//
+// 二段構え。
+//   1. 件数 — 各シャードの常駐領域(索引全体の 5%)を読んでおき、足りないバイトだけ
+//      Range で取りに行く。全件が正確に出て、追加転送は 1 クエリ 0.1 MB 程度
+//   2. 用例 — 件のあるシャードだけ丸ごと落として前後文脈を組む
+//
+// 位置復元と文脈取り出しは LF を数百段も逐次に辿るので Range では往復が過大になる。
+// 数えるのと見せるので経路を分けている。
 
-async function scanFrom(start) {
-  state.running = true;
-  state.abort = false;
-  $("stop").hidden = false;
-  $("more").hidden = true;
-  $("run").disabled = true;
+const LIMIT = 12;               // 同時に投げる要求の数
+let active = 0;
+const waiting = [];
+async function slot() {
+  if (active >= LIMIT) await new Promise((r) => waiting.push(r));
+  active++;
+}
+function release() {
+  active--;
+  const next = waiting.shift();
+  if (next) next();
+}
 
-  for (let k = start; k < manifest.shards.length; k++) {
-    if (state.abort) { state.next = k; break; }
-    const s = manifest.shards[k];
-    let buf;
-    try {
-      buf = new Uint8Array(await (await fetch(BASE + s.file)).arrayBuffer());
-    } catch (e) {
-      console.warn(`${s.file} を取得できない`, e);
-      continue;
-    }
-    state.bytes += buf.length;
+async function getRange(file, at, len) {
+  await slot();
+  try {
+    const r = await fetch(BASE + file, { headers: { Range: `bytes=${at}-${at + len - 1}` } });
+    if (r.status !== 206 && r.status !== 200) throw new Error(`${file} が ${r.status}`);
+    const b = new Uint8Array(await r.arrayBuffer());
+    state.bytes += b.length;
+    return b;
+  } finally {
+    release();
+  }
+}
+
+/// 常駐領域を読み込む(初回のみ)。以後のクエリはこれを使い回す
+async function ensureResidents(onStep) {
+  if (residents.length === manifest.shards.length) return;
+  residents.length = 0;
+  let done = 0;
+  await Promise.all(manifest.shards.map(async (s, i) => {
+    const buf = await getRange(s.file, 0, s.resident);
     const p = put(buf);
-    const h = az.az_shard_load(p, buf.length);
-    if (h < 0) { az.az_free(p, buf.length); continue; }
+    const h = az.az_resident_load(p, buf.length);
+    az.az_free(p, buf.length);
+    if (h < 0) throw new Error(`${s.file} の常駐領域を読めない`);
+    residents[i] = h;
+    onStep(++done);
+  }));
+}
 
-    for (const f of state.forms) {
-      const n = countIn(h, f.form);
-      if (n > 0) {
-        state.counts.set(f.form, (state.counts.get(f.form) || 0) + n);
-        state.total += n;
-        if (state.rows.length < SHOW_MAX) {
-          for (const r of kwicIn(h, f.form, PER_SHARD)) {
-            state.rows.push(r);
-            state.byWork.set(r.id, (state.byWork.get(r.id) || 0) + 1);
-          }
-        }
+/// 1 シャードで 1 つの形を数える。足りないバイトは取りに行く
+async function countOne(i, wordBytes) {
+  const wp = put(wordBytes);
+  try {
+    for (let round = 0; round < 500; round++) {
+      const r = az.az_resident_count(residents[i], wp, wordBytes.length);
+      if (r >= 0) return r;
+      if (r !== -2) throw new Error(`戻り値 ${r}`);
+      const out = readOut();
+      const dv = new DataView(out.buffer, out.byteOffset, out.byteLength);
+      for (let k = 0; k + 8 <= out.length; k += 8) {
+        const at = dv.getUint32(k, true);
+        const len = dv.getUint32(k + 4, true);
+        const bytes = await getRange(manifest.shards[i].file, at, len);
+        const bp = put(bytes);
+        az.az_resident_supply(residents[i], at, bp, bytes.length);
+        az.az_free(bp, bytes.length);
       }
     }
-    az.az_shard_drop(h);
-    az.az_free(p, buf.length);
-    state.scanned = k + 1;
-    state.next = k + 1;
-    render();
-    await new Promise((r) => setTimeout(r, 0));  // 画面を描かせる
+    throw new Error("収束しない");
+  } finally {
+    az.az_free(wp, wordBytes.length);
   }
+}
 
-  state.running = false;
-  $("run").disabled = false;
-  $("stop").hidden = true;
-  $("more").hidden = state.next >= manifest.shards.length;
-  render();
+/// 用例を組む。件のあるシャードを丸ごと落とす
+async function examplesFrom(i, forms) {
+  await slot();
+  let buf;
+  try {
+    buf = new Uint8Array(await (await fetch(BASE + manifest.shards[i].file)).arrayBuffer());
+  } finally {
+    release();
+  }
+  state.bytes += buf.length;
+  const p = put(buf);
+  const h = az.az_shard_load(p, buf.length);
+  if (h < 0) { az.az_free(p, buf.length); return; }
+  for (const f of forms) {
+    if (state.rows.length >= SHOW_MAX) break;
+    if ((state.perShard.get(i) || {})[f.form]) {
+      for (const r of kwicIn(h, f.form, PER_SHARD)) {
+        state.rows.push(r);
+        state.byWork.set(r.id, (state.byWork.get(r.id) || 0) + 1);
+      }
+    }
+  }
+  az.az_shard_drop(h);
+  az.az_free(p, buf.length);
 }
 
 async function search() {
   const q = $("q").value.trim();
-  if (!q || !az) return;
+  if (!q || !az || state.running) return;
   const useVariants = $("opt-variants").getAttribute("aria-pressed") === "true";
   const risky = $("opt-risky").getAttribute("aria-pressed") === "true";
 
@@ -174,15 +225,62 @@ async function search() {
   state.counts = new Map();
   state.rows = [];
   state.byWork = new Map();
+  state.perShard = new Map();
+  state.total = 0;
   state.scanned = 0;
   state.bytes = 0;
-  state.total = 0;
-  state.next = 0;
+  state.running = true;
   state.facets = { kana: new Set(), genre: new Set() };
-
   $("readout").hidden = false;
   $("empty").hidden = true;
-  await scanFrom(0);
+  $("run").disabled = true;
+  $("phase").textContent = "索引の目次を読み込み中…";
+  render();
+
+  try {
+    await ensureResidents((n) => {
+      state.scanned = n;
+      $("phase").textContent = `索引の目次 ${n} / ${manifest.shards.length} 枚`;
+      render();
+    });
+
+    // 第 1 段 — 全件を数える
+    $("phase").textContent = "全件を数えています…";
+    state.scanned = 0;
+    const encoded = state.forms.map((f) => ({ f, b: enc.encode(f.form) }));
+    await Promise.all(manifest.shards.map(async (_, i) => {
+      const here = {};
+      for (const { f, b } of encoded) {
+        const n = await countOne(i, b);
+        if (n > 0) {
+          here[f.form] = n;
+          state.counts.set(f.form, (state.counts.get(f.form) || 0) + n);
+          state.total += n;
+        }
+      }
+      if (Object.keys(here).length) state.perShard.set(i, here);
+      state.scanned++;
+      if (state.scanned % 4 === 0) render();
+    }));
+    render();
+
+    // 第 2 段 — 用例を組む
+    const withHits = [...state.perShard.keys()].sort((a, b) => a - b);
+    $("phase").textContent = `用例を組んでいます(該当 ${withHits.length} 枚)…`;
+    for (const i of withHits) {
+      if (state.rows.length >= SHOW_MAX) break;
+      await examplesFrom(i, state.forms);
+      render();
+    }
+    $("phase").textContent = "";
+  } catch (e) {
+    $("phase").textContent = `失敗しました: ${e.message}`;
+    console.error(e);
+  } finally {
+    state.running = false;
+    $("run").disabled = false;
+    render();
+  }
 }
 
 // ---------------------------------------------------------------- 表示
@@ -205,6 +303,7 @@ function render() {
   $("bytes").textContent = (state.bytes / 1e6).toFixed(1);
   $("progress-fill").style.width =
     `${(state.scanned / manifest.shards.length * 100).toFixed(1)}%`;
+  $("hit-shards").textContent = state.perShard.size;
 
   // 当たった形
   const fw = $("forms");
@@ -377,8 +476,6 @@ async function boot() {
 
   $("run").addEventListener("click", search);
   $("q").addEventListener("keydown", (e) => { if (e.key === "Enter") search(); });
-  $("stop").addEventListener("click", () => { state.abort = true; });
-  $("more").addEventListener("click", () => scanFrom(state.next));
   for (const b of document.querySelectorAll(".chip")) {
     b.addEventListener("click", () => {
       b.setAttribute("aria-pressed", b.getAttribute("aria-pressed") === "true" ? "false" : "true");

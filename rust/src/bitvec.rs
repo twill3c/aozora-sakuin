@@ -11,6 +11,9 @@ pub struct BitVec {
     /// 512 ビット(= 8 ワード)ごとの、そこまでの 1 の総数
     superblocks: Vec<u32>,
     len: usize,
+    /// ワードが手元にあるか。空なら全て在る(丸ごと読み込んだ場合)。
+    /// Range で必要な分だけ読む場合はここが疎になり、無いところに触ると `None` を返す
+    present: Vec<bool>,
 }
 
 const WORD: usize = 64;
@@ -43,6 +46,7 @@ impl BitVec {
             words,
             superblocks,
             len,
+            present: Vec::new(),
         }
     }
 
@@ -106,6 +110,7 @@ impl BitVec {
             words,
             superblocks,
             len,
+            present: Vec::new(),
         }
     }
 
@@ -116,5 +121,74 @@ impl BitVec {
 
     pub fn word_bytes(&self) -> usize {
         self.words.len() * 8
+    }
+
+    // --- 部分読み。Range で必要なワードだけ取りに行くための入口 ---
+
+    /// ワードを持たない状態で組む。rank 標本だけが手元にある場合。
+    pub fn from_parts_absent(n_words: usize, superblocks: Vec<u32>, len: usize) -> Self {
+        BitVec {
+            words: vec![0; n_words],
+            superblocks,
+            len,
+            present: vec![false; n_words],
+        }
+    }
+
+    /// ワードを 1 個供給する
+    pub fn supply(&mut self, index: usize, word: u64) {
+        if index < self.words.len() {
+            self.words[index] = word;
+            if !self.present.is_empty() {
+                self.present[index] = true;
+            }
+        }
+    }
+
+    pub fn word_count(&self) -> usize {
+        self.words.len()
+    }
+
+    /// `present` が空なら「全部ある」(丸ごと読み込んだ場合)
+    fn have(&self, i: usize) -> bool {
+        self.present.is_empty() || self.present.get(i).copied().unwrap_or(false)
+    }
+
+    /// 手元に無いワードに触れたら `None` を返し、その番号を `missing` に積む。
+    ///
+    /// 丸ごと読み込んだ場合は常に `Some` で、`rank1` と同じ値になる。
+    /// **この一致が O-03 の照合対象**。
+    pub fn try_rank1(&self, i: usize, missing: &mut Vec<u32>) -> Option<usize> {
+        debug_assert!(i <= self.len);
+        let word = i / WORD;
+        let sb = word / SUPER;
+        let mut acc = self.superblocks[sb] as usize;
+        let mut ok = true;
+        for w in sb * SUPER..word {
+            if self.have(w) {
+                acc += self.words[w].count_ones() as usize;
+            } else {
+                missing.push(w as u32);
+                ok = false;
+            }
+        }
+        let rem = i % WORD;
+        if rem > 0 {
+            if self.have(word) {
+                acc += (self.words[word] & ((1u64 << rem) - 1)).count_ones() as usize;
+            } else {
+                missing.push(word as u32);
+                ok = false;
+            }
+        }
+        if ok {
+            Some(acc)
+        } else {
+            None
+        }
+    }
+
+    pub fn try_rank0(&self, i: usize, missing: &mut Vec<u32>) -> Option<usize> {
+        self.try_rank1(i, missing).map(|r| i - r)
     }
 }

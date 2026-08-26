@@ -136,7 +136,8 @@ button:focus-visible, input:focus-visible, a:focus-visible {
   font-variant-numeric: tabular-nums;
 }
 .readout .metric b { color: var(--ok); font-weight: 500; }
-.scan-ctl { margin-left: auto; display: flex; gap: 8px; }
+.scan-ctl { margin-left: auto; display: flex; gap: 8px; align-items: baseline; }
+.phase { font-family: var(--mono); font-size: 11.5px; color: var(--ai); }
 .ghost {
   font-family: var(--sans); font-size: 12px; padding: 3px 12px;
   background: transparent; border: 1px solid var(--line-strong); border-radius: 2px;

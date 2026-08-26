@@ -192,3 +192,136 @@ pub fn plan_shards(sizes: &[usize], target: usize) -> Vec<(usize, usize)> {
     }
     out
 }
+
+// ---------------------------------------------------------------- 部分読み
+
+/// ファイル内の位置。JS はこの範囲を Range で取りに行く
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ByteRange {
+    pub at: u32,
+    pub len: u32,
+}
+
+/// 常駐領域だけを読んだシャード。ワード列は持たず、必要になった分だけ供給する。
+///
+/// 全 228 枚を丸ごと落とすと 232.9 MB になるが、計数に要るワードだけなら
+/// 1 語あたり数十個で済む。位置復元と文脈取り出しは LF が数百段の逐次なので
+/// この経路では扱わない — 表示する数枚だけ丸ごと落とす。
+pub struct PartialShard {
+    pub fm: FmIndex,
+    pub docs: Vec<Doc>,
+    /// ファイル内でワード列が始まる位置
+    words_at: u32,
+    /// 各ノードのワード列が、ワード領域の中で始まる位置(ワード数)
+    node_offsets: Vec<u32>,
+}
+
+impl PartialShard {
+    /// 常駐領域(ファイル先頭から `resident` バイト)だけから組む
+    pub fn from_resident(buf: &[u8]) -> Result<Self, String> {
+        if buf.len() < HEADER {
+            return Err("短すぎる".into());
+        }
+        let u32at = |p: usize| u32::from_le_bytes(buf[p..p + 4].try_into().unwrap());
+        if u32at(0) != MAGIC {
+            return Err("magic が違う".into());
+        }
+        if u32at(4) != VERSION {
+            return Err(format!("版が違う: {} (期待 {VERSION})", u32at(4)));
+        }
+        let n_docs = u32at(12) as usize;
+        let resident = u64::from_le_bytes(buf[16..24].try_into().unwrap()) as usize;
+        if buf.len() < resident {
+            return Err(format!("常駐領域が足りない: {} < {resident}", buf.len()));
+        }
+        let region = |i: usize| -> &[u8] {
+            let at = u32at(24 + i * 8) as usize;
+            let len = u32at(28 + i * 8) as usize;
+            if at + len <= buf.len() {
+                &buf[at..at + len]
+            } else {
+                &[]
+            }
+        };
+        let docs_b = region(0);
+        let mut docs = Vec::with_capacity(n_docs);
+        for i in 0..n_docs {
+            docs.push(Doc {
+                id: u32::from_le_bytes(docs_b[i * 8..i * 8 + 4].try_into().unwrap()),
+                offset: u32::from_le_bytes(docs_b[i * 8 + 4..i * 8 + 8].try_into().unwrap()),
+            });
+        }
+        let fm = FmIndex::read_parts_absent(region(1), region(2), region(3));
+        let node_offsets = fm.node_word_offsets();
+        Ok(PartialShard {
+            fm,
+            docs,
+            words_at: u32at(24 + 4 * 8),
+            node_offsets,
+        })
+    }
+
+    /// 常駐領域の大きさ(ヘッダだけ読めば分かる)
+    pub fn resident_len(header: &[u8]) -> Option<usize> {
+        if header.len() < HEADER || u32::from_le_bytes(header[0..4].try_into().ok()?) != MAGIC {
+            return None;
+        }
+        Some(u64::from_le_bytes(header[16..24].try_into().ok()?) as usize)
+    }
+
+    /// 語を数える。足りなければ `Err(要るバイト範囲)` を返す
+    pub fn try_count(&self, pattern: &[u8]) -> Result<usize, Vec<ByteRange>> {
+        let mut missing = Vec::new();
+        match self.fm.try_count(pattern, &mut missing) {
+            Some(n) => Ok(n),
+            None => {
+                missing.sort_unstable();
+                missing.dedup();
+                let mut out: Vec<ByteRange> = missing
+                    .into_iter()
+                    .map(|(node, w)| ByteRange {
+                        at: self.words_at + (self.node_offsets[node as usize] + w) * 8,
+                        len: 8,
+                    })
+                    .collect();
+                out.sort_by_key(|r| r.at);
+                // 隣り合う範囲はまとめて 1 回の読みにする
+                let mut merged: Vec<ByteRange> = Vec::with_capacity(out.len());
+                for r in out {
+                    match merged.last_mut() {
+                        Some(p) if p.at + p.len >= r.at => {
+                            p.len = (r.at + r.len).saturating_sub(p.at);
+                        }
+                        _ => merged.push(r),
+                    }
+                }
+                Err(merged)
+            }
+        }
+    }
+
+    /// ファイル位置 `at` から始まるバイト列を供給する
+    pub fn supply(&mut self, at: u32, bytes: &[u8]) {
+        if at < self.words_at {
+            return;
+        }
+        let first = ((at - self.words_at) / 8) as usize;
+        for (k, chunk) in bytes.chunks_exact(8).enumerate() {
+            let w = first + k;
+            // どのノードの何番目のワードか
+            let node = match self.node_offsets.binary_search(&(w as u32)) {
+                Ok(mut i) => {
+                    // 同じ開始位置を持つノード(葉)が並ぶので、最後の一つを取る
+                    while i + 1 < self.node_offsets.len() && self.node_offsets[i + 1] == w as u32 {
+                        i += 1;
+                    }
+                    i
+                }
+                Err(i) => i.saturating_sub(1),
+            };
+            let idx = w - self.node_offsets[node] as usize;
+            self.fm
+                .supply(node, idx, u64::from_le_bytes(chunk.try_into().unwrap()));
+        }
+    }
+}

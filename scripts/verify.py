@@ -76,6 +76,7 @@ def main():
         if (ROOT / "web/index").exists():
             ok &= run("wasm 実地検査", ["node", "scripts/verify_wasm.mjs"])
             ok &= run_with_server("画面の実地検査", ["node", "scripts/verify_ui.mjs"])
+            ok &= run_with_server("Range の実地検査", ["node", "scripts/verify_range.mjs"], port=8801)
         else:
             print("\n=== wasm 実地検査 ===\n--- 省略: web/index が無い(先に build_shards)")
 

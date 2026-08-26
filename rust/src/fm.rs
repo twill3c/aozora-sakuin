@@ -42,6 +42,8 @@ pub struct FmIndex {
     /// SA 標本(行→位置)とは向きが逆で、両方が要る。
     isa_sample: Vec<u32>,
     n: usize,
+    /// 木のメタ部分(直列化したバイト列の残り)。部分読みで木を組み直すのに要る
+    meta_tail: Vec<u8>,
 }
 
 impl FmIndex {
@@ -92,6 +94,7 @@ impl FmIndex {
             sa_sample: sample,
             isa_sample: isa,
             n,
+            meta_tail: Vec::new(),
         }
     }
 
@@ -316,9 +319,18 @@ impl FmIndex {
         p += 4;
         let n_isa = u32::from_le_bytes(meta[p..p + 4].try_into().unwrap()) as usize;
         p += 4;
+        // 標本領域は常駐領域の外にある。計数だけなら位置を求めないので不要で、
+        // 部分読みではここが空のまま渡ってくる
+        let have_sample = sample.len() >= (n_sample + n_isa) * 4;
         let at = |i: usize| u32::from_le_bytes(sample[i * 4..i * 4 + 4].try_into().unwrap());
-        let sa_sample: Vec<u32> = (0..n_sample).map(at).collect();
-        let isa_sample: Vec<u32> = (n_sample..n_sample + n_isa).map(at).collect();
+        let (sa_sample, isa_sample) = if have_sample {
+            (
+                (0..n_sample).map(at).collect(),
+                (n_sample..n_sample + n_isa).map(at).collect(),
+            )
+        } else {
+            (Vec::new(), Vec::new())
+        };
         FmIndex {
             wt: WaveletTree::read_parts(&meta[p..], sb, words),
             c,
@@ -326,6 +338,7 @@ impl FmIndex {
             sa_sample,
             isa_sample,
             n,
+            meta_tail: meta[p..].to_vec(),
         }
     }
 
@@ -337,5 +350,78 @@ impl FmIndex {
             (self.sa_sample.len() + self.isa_sample.len()) * 4,
             words,
         )
+    }
+}
+
+// ---------------------------------------------------------------- 部分読み
+
+/// ワードを持たない索引。rank 標本と木の形だけが手元にあり、必要なワードは
+/// 後から供給する。**計数だけなら位置を求めないので、これで足りる**。
+///
+/// 丸ごと読み込んだ索引と同じ答えを返さなければならない(O-03)。
+impl FmIndex {
+    /// メタと rank 標本だけから組む。ワード列は空
+    pub fn read_parts_absent(meta: &[u8], sb: &[u8], sample: &[u8]) -> Self {
+        let mut fm = Self::read_parts(meta, sb, sample, &[]);
+        fm.wt = WaveletTree::read_parts_absent(&fm.meta_tail, sb);
+        fm
+    }
+
+    /// ワードを 1 個供給する
+    pub fn supply(&mut self, node: usize, word_index: usize, word: u64) {
+        self.wt.supply(node, word_index, word);
+    }
+
+    /// 各ノードのワード列が、直列化したワード領域の中で始まる位置(ワード数)
+    pub fn node_word_offsets(&self) -> Vec<u32> {
+        self.wt.node_word_offsets()
+    }
+
+    /// 後方探索。ワードが足りなければ `None` を返し、要るワードを `missing` に積む。
+    ///
+    /// 途中まで進んだ状態は保持しない — 供給してから最初からやり直す。
+    /// 1 段進むごとに必要なワードは 2 個だけなので、やり直しの費用は無視できる
+    /// (すでに供給したワードは手元にあるため、次は先へ進む)。
+    pub fn try_count(&self, pattern: &[u8], missing: &mut Vec<(u32, u32)>) -> Option<usize> {
+        if pattern.is_empty() {
+            return Some(0);
+        }
+        // このシャードに現れないバイトが 1 つでもあれば 0 件。
+        // C 表は常駐領域にあるので、**ワードを 1 つも読まずに** 答えが出る
+        for &ch in pattern {
+            if self.c[ch as usize + 1] == self.c[ch as usize] {
+                return Some(0);
+            }
+        }
+
+        let mut lo = 0usize;
+        let mut hi = self.n + 1;
+        for (step, &ch) in pattern.iter().rev().enumerate() {
+            let base = self.c[ch as usize] as usize;
+            if step == 0 {
+                // 最初の 1 歩は rank(c,0)=0 と rank(c,行数)=その文字の総数 で、
+                // どちらも C 表から出る。ここでもワードを読まない
+                lo = base;
+                hi = self.c[ch as usize + 1] as usize;
+            } else {
+                let a = if lo == 0 {
+                    Some(0)
+                } else {
+                    self.wt.try_rank(ch, lo, missing)
+                };
+                let b = self.wt.try_rank(ch, hi, missing);
+                match (a, b) {
+                    (Some(x), Some(y)) => {
+                        lo = base + x;
+                        hi = base + y;
+                    }
+                    _ => return None,
+                }
+            }
+            if lo >= hi {
+                return Some(0);
+            }
+        }
+        Some(hi - lo)
     }
 }

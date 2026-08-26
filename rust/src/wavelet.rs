@@ -316,13 +316,17 @@ impl WaveletTree {
                     })
                     .collect();
                 sb_at += n_sb * 4;
-                let ws: Vec<u64> = (0..n_w)
-                    .map(|i| {
-                        u64::from_le_bytes(
-                            words[w_at + i * 8..w_at + i * 8 + 8].try_into().unwrap(),
-                        )
-                    })
-                    .collect();
+                let ws: Vec<u64> = if words.len() >= w_at + n_w * 8 {
+                    (0..n_w)
+                        .map(|i| {
+                            u64::from_le_bytes(
+                                words[w_at + i * 8..w_at + i * 8 + 8].try_into().unwrap(),
+                            )
+                        })
+                        .collect()
+                } else {
+                    vec![0u64; n_w] // ワード列を持たずに組む(Range で後から供給する)
+                };
                 w_at += n_w * 8;
                 nodes.push(Node::Inner {
                     bv: BitVec::from_parts(ws, sbs, bv_len),
@@ -352,5 +356,84 @@ impl WaveletTree {
             }
         }
         (sb, w)
+    }
+}
+
+// ---------------------------------------------------------------- 部分読み
+
+/// ワードが手元に無いときに `None` を返す版。Range で必要な分だけ読むために使う。
+///
+/// 丸ごと読み込んだ木では `rank`/`access` と同じ値を返す — この一致が O-03 の照合対象。
+impl WaveletTree {
+    /// (ノード番号, ワード番号) の形で不足を積む
+    pub fn try_rank(&self, c: u8, i: usize, missing: &mut Vec<(u32, u32)>) -> Option<usize> {
+        let (code, clen) = self.codes[c as usize];
+        if clen == 0 {
+            return Some(0);
+        }
+        let mut node = 0usize;
+        let mut idx = i;
+        let mut buf = Vec::new();
+        for d in 0..clen {
+            let bit = code >> (clen - 1 - d) & 1 == 1;
+            match &self.nodes[node] {
+                Node::Leaf(_) => break,
+                Node::Inner { bv, left, right } => {
+                    buf.clear();
+                    let got = if bit {
+                        bv.try_rank1(idx, &mut buf)
+                    } else {
+                        bv.try_rank0(idx, &mut buf)
+                    };
+                    match got {
+                        Some(v) => idx = v,
+                        None => {
+                            for w in &buf {
+                                missing.push((node as u32, *w));
+                            }
+                            return None;
+                        }
+                    }
+                    node = if bit { *right } else { *left } as usize;
+                }
+            }
+        }
+        Some(idx)
+    }
+
+    /// ノードのビット列へワードを 1 個供給する
+    pub fn supply(&mut self, node: usize, word_index: usize, word: u64) {
+        if let Some(Node::Inner { bv, .. }) = self.nodes.get_mut(node) {
+            bv.supply(word_index, word);
+        }
+    }
+
+    /// ワードを持たない木を、直列化した「メタ」と「rank 標本」だけから組む
+    pub fn read_parts_absent(meta: &[u8], sb: &[u8]) -> Self {
+        let mut wt = Self::read_parts(meta, sb, &[]);
+        for n in wt.nodes.iter_mut() {
+            if let Node::Inner { bv, .. } = n {
+                let words = (bv.len() + 63) / 64;
+                let sbs = bv.superblocks().to_vec();
+                *bv = BitVec::from_parts_absent(words, sbs, bv.len());
+            }
+        }
+        wt
+    }
+
+    /// 各ノードのワード列が、直列化したときに占める位置(先頭からのワード数)
+    pub fn node_word_offsets(&self) -> Vec<u32> {
+        let mut out = Vec::with_capacity(self.nodes.len());
+        let mut acc = 0u32;
+        for n in &self.nodes {
+            match n {
+                Node::Leaf(_) => out.push(acc),
+                Node::Inner { bv, .. } => {
+                    out.push(acc);
+                    acc += bv.word_count() as u32;
+                }
+            }
+        }
+        out
     }
 }

@@ -46,13 +46,11 @@
 
   <div class="readout" id="readout" hidden>
     <div class="hits"><span id="hits">0</span><span>件</span></div>
-    <div class="metric">走査 <b id="scan">0</b> / <span id="scan-total">0</span> 枚</div>
+    <div class="metric">シャード <b id="scan">0</b> / <span id="scan-total">0</span> 枚</div>
+    <div class="metric">該当 <span id="hit-shards">0</span> 枚</div>
     <div class="metric">転送 <b id="bytes">0</b> MB</div>
     <div class="metric">用例 <span id="shown">0</span> 件を表示</div>
-    <div class="scan-ctl">
-      <button type="button" id="stop" class="ghost">走査を止める</button>
-      <button type="button" id="more" class="ghost" hidden>続きを走査</button>
-    </div>
+    <div class="scan-ctl"><span class="phase" id="phase"></span></div>
     <div class="progress"><span id="progress-fill"></span></div>
   </div>
 
