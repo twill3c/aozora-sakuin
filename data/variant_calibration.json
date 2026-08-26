@@ -1,0 +1,278 @@
+{
+ "works": 5000,
+ "old_kana_works": 2006,
+ "rules": {
+  "い→ゐ": {
+   "hits": 58583,
+   "old_hits": 58275,
+   "old_ratio": 0.9947,
+   "old_ratio_pct": 99,
+   "probes": {
+    "ゐる": {
+     "hits": 55412,
+     "old": 55135
+    },
+    "ゐない": {
+     "hits": 2820,
+     "old": 2812
+    },
+    "つひに": {
+     "hits": 351,
+     "old": 328
+    }
+   }
+  },
+  "え→ゑ": {
+   "hits": 523,
+   "old_hits": 466,
+   "old_ratio": 0.891,
+   "old_ratio_pct": 89,
+   "probes": {
+    "こゑ": {
+     "hits": 346,
+     "old": 311
+    },
+    "すゑ": {
+     "hits": 177,
+     "old": 155
+    }
+   }
+  },
+  "じ→ぢ": {
+   "hits": 409,
+   "old_hits": 367,
+   "old_ratio": 0.8973,
+   "old_ratio_pct": 89,
+   "probes": {
+    "すぢ": {
+     "hits": 266,
+     "old": 251
+    },
+    "もみぢ": {
+     "hits": 115,
+     "old": 88
+    },
+    "はぢめ": {
+     "hits": 28,
+     "old": 28
+    }
+   }
+  },
+  "ず→づ": {
+   "hits": 1295,
+   "old_hits": 1037,
+   "old_ratio": 0.8008,
+   "old_ratio_pct": 80,
+   "probes": {
+    "しづか": {
+     "hits": 650,
+     "old": 601
+    },
+    "みづ": {
+     "hits": 525,
+     "old": 432
+    },
+    "つづみ": {
+     "hits": 120,
+     "old": 4
+    }
+   }
+  },
+  "う→ふ(語中)": {
+   "hits": 47777,
+   "old_hits": 46285,
+   "old_ratio": 0.9688,
+   "old_ratio_pct": 96,
+   "probes": {
+    "いふ": {
+     "hits": 47192,
+     "old": 45765
+    },
+    "おもふ": {
+     "hits": 585,
+     "old": 520
+    },
+    "さうらふ": {
+     "hits": 0,
+     "old": 0
+    }
+   }
+  },
+  "お→ほ(語中)": {
+   "hits": 3361,
+   "old_hits": 2601,
+   "old_ratio": 0.7739,
+   "old_ratio_pct": 77,
+   "probes": {
+    "なほ": {
+     "hits": 3297,
+     "old": 2541
+    },
+    "こほり": {
+     "hits": 23,
+     "old": 22
+    },
+    "とほい": {
+     "hits": 41,
+     "old": 38
+    }
+   }
+  },
+  "わ→は(語中)": {
+   "hits": 1606,
+   "old_hits": 1355,
+   "old_ratio": 0.8437,
+   "old_ratio_pct": 84,
+   "probes": {
+    "かはいい": {
+     "hits": 25,
+     "old": 20
+    },
+    "あはれ": {
+     "hits": 1197,
+     "old": 987
+    },
+    "かはり": {
+     "hits": 384,
+     "old": 348
+    }
+   }
+  },
+  "長音 こう→かう": {
+   "hits": 2013,
+   "old_hits": 2005,
+   "old_ratio": 0.996,
+   "old_ratio_pct": 99,
+   "probes": {
+    "かうして": {
+     "hits": 920,
+     "old": 918
+    },
+    "かういふ": {
+     "hits": 1093,
+     "old": 1087
+    }
+   }
+  },
+  "長音 そう→さう": {
+   "hits": 8394,
+   "old_hits": 8368,
+   "old_ratio": 0.9969,
+   "old_ratio_pct": 99,
+   "probes": {
+    "さうして": {
+     "hits": 3304,
+     "old": 3293
+    },
+    "さういふ": {
+     "hits": 2462,
+     "old": 2457
+    },
+    "さうだ": {
+     "hits": 2628,
+     "old": 2618
+    }
+   }
+  },
+  "長音 よう→やう": {
+   "hits": 46152,
+   "old_hits": 45913,
+   "old_ratio": 0.9948,
+   "old_ratio_pct": 99,
+   "probes": {
+    "やうな": {
+     "hits": 19502,
+     "old": 19416
+    },
+    "やうに": {
+     "hits": 26582,
+     "old": 26437
+    },
+    "やうす": {
+     "hits": 68,
+     "old": 60
+    }
+   }
+  },
+  "長音 とう→たう": {
+   "hits": 430,
+   "old_hits": 421,
+   "old_ratio": 0.9791,
+   "old_ratio_pct": 97,
+   "probes": {
+    "たうとう": {
+     "hits": 430,
+     "old": 421
+    }
+   }
+  },
+  "長音 ちょう→ちやう": {
+   "hits": 514,
+   "old_hits": 511,
+   "old_ratio": 0.9942,
+   "old_ratio_pct": 99,
+   "probes": {
+    "ちやうど": {
+     "hits": 514,
+     "old": 511
+    }
+   }
+  },
+  "お→を": {
+   "hits": 937,
+   "old_hits": 347,
+   "old_ratio": 0.3703,
+   "old_ratio_pct": 37,
+   "probes": {
+    "をもう": {
+     "hits": 665,
+     "old": 113
+    },
+    "をんな": {
+     "hits": 110,
+     "old": 104
+    },
+    "をとこ": {
+     "hits": 87,
+     "old": 56
+    },
+    "かをり": {
+     "hits": 75,
+     "old": 74
+    }
+   }
+  },
+  "え→へ(語中)": {
+   "hits": 12386,
+   "old_hits": 1938,
+   "old_ratio": 0.1565,
+   "old_ratio_pct": 15,
+   "probes": {
+    "こへ": {
+     "hits": 12164,
+     "old": 1830
+    },
+    "そへ": {
+     "hits": 222,
+     "old": 108
+    }
+   }
+  },
+  "か→くわ": {
+   "hits": 705,
+   "old_hits": 36,
+   "old_ratio": 0.0511,
+   "old_ratio_pct": 5,
+   "probes": {
+    "くわし": {
+     "hits": 704,
+     "old": 36
+    },
+    "くわじ": {
+     "hits": 1,
+     "old": 0
+    }
+   }
+  }
+ }
+}
