@@ -1,0 +1,19 @@
+[package]
+name = "aozora-sakuin"
+version = "0.1.0"
+edition = "2021"
+description = "青空索引 — 5,000 作の全文索引(SA-IS / BWT / FM-index)"
+license = "MIT"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+
+# panic = "abort" は置かない — cargo test --release が通らなくなる。
+# wasm32-unknown-unknown は既定で巻き戻しを行わないため、配信サイズには影響しない
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
