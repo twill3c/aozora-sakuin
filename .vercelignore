@@ -1,0 +1,6 @@
+# 配信するのは web/ だけ。ほかは全て除外する。
+# 除外し忘れると data/raw(407MB) と data/normalized(300MB) まで上がる
+*
+!web
+!web/**
+!vercel.json
