@@ -111,3 +111,28 @@ def test_w08_暗い配色と明るい配色の両方が定義されている():
     dark_vars = set(re.findall(r"--([a-z-]+):", dark_block))
     only_dark = sorted(dark_vars - root_vars)
     assert not only_dark, f"暗い配色でしか定義されていない色がある: {only_dark}"
+
+
+def test_w09_配信物に台帳が指さないファイルがない():
+    """組み直しで枚数が変わると、前の生成物が残る。manifest が指さないファイルが
+    配信物に紛れ込むと、無駄に上がるうえ何が本物か分からなくなる(実際に 175 枚残った)。"""
+    if not MANIFEST.exists():
+        pytest.skip("web/index/manifest.json が無い")
+    m = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    listed = {s["file"] for s in m["shards"]}
+    on_disk = {p.name for p in (WEB / "index").glob("*.azsk")}
+    stray = sorted(on_disk - listed)
+    missing = sorted(listed - on_disk)
+    assert not stray, f"台帳にないシャードが {len(stray)} 枚: {stray[:5]}"
+    assert not missing, f"台帳にあるのに無いシャードが {len(missing)} 枚: {missing[:5]}"
+
+
+def test_w10_配信物の総量が想定に収まる():
+    """web/ 全体の大きさ。残骸が混ざると跳ね上がる。"""
+    if not MANIFEST.exists():
+        pytest.skip("web/index/manifest.json が無い")
+    total = sum(p.stat().st_size for p in WEB.rglob("*") if p.is_file())
+    m = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    # 索引 + 台帳 + wasm + 画面。索引の 1.05 倍を超えたら何かが余分に混ざっている
+    assert total < m["total_bytes"] * 1.05, \
+        f"web/ が {total/1e6:.0f} MB / 索引は {m['total_bytes']/1e6:.0f} MB"

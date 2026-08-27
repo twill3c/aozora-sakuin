@@ -59,6 +59,19 @@ fn main() {
     );
 
     fs::create_dir_all(&out).unwrap();
+    // 前回の生成物を消す。枚数を変えて組み直したとき、古いシャードが残ると
+    // manifest が指さないファイルが配信物に紛れ込む(実際に 175 枚残った)
+    let mut swept = 0;
+    for e in fs::read_dir(&out).unwrap().flatten() {
+        if e.path().extension().map(|x| x == "azsk").unwrap_or(false) {
+            fs::remove_file(e.path()).unwrap();
+            swept += 1;
+        }
+    }
+    if swept > 0 {
+        println!("前回のシャード {swept} 枚を削除");
+    }
+
     let t1 = Instant::now();
     let mut manifest = Vec::new();
     let (mut sum_bytes, mut sum_resident, mut max_bytes) = (0usize, 0usize, 0usize);
