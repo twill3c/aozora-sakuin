@@ -1,5 +1,5 @@
 {
-  "scaffold_version": "1.12.0",
+  "scaffold_version": "1.13.0",
   "registry_hint": "harness-kit/scaffold-kit/registry",
   "components": [
     {
@@ -7,8 +7,8 @@
       "id": "agents_core",
       "target": "AGENTS.md",
       "source": "blocks/agents_core.md",
-      "installed_version": "1.12.0",
-      "installed_sha256": "50cc0109bd17e26f4264a9d8164974cba2471d808068c81daacd5a68549ddc96"
+      "installed_version": "1.13.0",
+      "installed_sha256": "70525cd30f3d5dd74f46c38e6f799dc4c37398513fe6ba18c5948ddf2e991b55"
     },
     {
       "type": "file",
