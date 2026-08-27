@@ -42,6 +42,8 @@
 
 body {
   margin: 0;
+  /* 下部固定のフリートフッタ(末尾の fleet: fixed footer)に隠れないための逃げ */
+  padding-bottom: 46px;
   background: var(--bg);
   color: var(--ink);
   font-family: var(--sans);
@@ -289,3 +291,14 @@ button:focus-visible, input:focus-visible, a:focus-visible {
   .search-field input { font-size: 18px; }
   .scan-ctl { margin-left: 0; }
 }
+
+/* fleet: fixed footer */
+footer.fleet-footer {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 10;
+  background: var(--bg); border-top: 1px solid var(--line);
+  color: var(--muted); font-size: 12px; text-align: center;
+  padding: 8px 16px; white-space: nowrap; overflow-x: auto;
+}
+footer.fleet-footer p { margin: 0; }
+footer.fleet-footer a { color: var(--muted); }
+footer.fleet-footer a:hover { color: var(--ink-soft); }
