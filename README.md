@@ -1,5 +1,7 @@
 # 青空索引（aozora-sakuin）
 
+**本番: https://aozora-sakuin.vercel.app**
+
 青空文庫の **5,000 作品**を単一の全文索引に統合し、任意の語句が**どの作品でどう使われているか**を
 前後文脈つきの用例集（KWIC）として引く。フリートの各アトラスが「一作・一作家の中を掘る」道具で
 あるのに対し、本プロジェクトは「作家と時代をまたいで語を横に読む」道具である。
@@ -81,6 +83,9 @@ python scripts/serve.py        # http://127.0.0.1:8787/
 
 # 品質ゲート(Python / fmt / clippy / cargo test / wasm / 実地検査)
 python scripts/verify.py
+
+# 本番のヘルスチェック(Range が効き、全件が手元の実測と一致するか)
+node scripts/verify_prod.mjs
 ```
 
 ## 構成
