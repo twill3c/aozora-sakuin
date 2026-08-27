@@ -137,7 +137,12 @@ async function getRange(file, at, len) {
   await slot();
   try {
     const r = await fetch(BASE + file, { headers: { Range: `bytes=${at}-${at + len - 1}` } });
-    if (r.status !== 206 && r.status !== 200) throw new Error(`${file} が ${r.status}`);
+    // 206 以外は受けない。200 が返るのは配信側が Range を無視してファイル全体を
+    // 返した場合で、そのまま供給すると別のバイトを索引に食わせることになる。
+    // 静かに壊れるより落ちるほうがよい
+    if (r.status !== 206) {
+      throw new Error(`${file} が Range に応じません(${r.status})。配信側が Range 未対応です`);
+    }
     const b = new Uint8Array(await r.arrayBuffer());
     state.bytes += b.length;
     return b;
