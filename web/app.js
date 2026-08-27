@@ -12,8 +12,11 @@
 
 const BASE = "index/";
 const WIDTH = 30;          // 前後文脈の長さ(バイト)
-const PER_SHARD = 6;       // 1 シャードから拾う用例の上限
-const SHOW_MAX = 120;      // 画面に出す用例の上限
+// 用例は「該当シャードを丸ごと落として組む」経路なので、落とす枚数がそのまま転送量になる。
+// 1 枚からたくさん拾い、追加の枚は利用者が求めたときだけ落とす。
+// (取り出しを Range にすると LF の逐次歩行で 1 枚あたり 1 万往復を超える。実測済み)
+const PER_SHARD = 40;      // 1 シャードから拾う用例の上限
+const SHOW_MAX = 400;      // 画面に出す用例の上限
 
 const $ = (id) => document.getElementById(id);
 const enc = new TextEncoder();
@@ -33,6 +36,8 @@ const state = {
   rows: [],                // 用例
   byWork: new Map(),       // 作品ID -> 件数
   perShard: new Map(),     // シャード番号 -> {形: 件数}
+  withHits: [],            // 件のあるシャード
+  nextDisplay: 0,          // 次に用例を取りに行くシャード
   scanned: 0,
   bytes: 0,
   total: 0,
@@ -218,6 +223,21 @@ async function examplesFrom(i, forms) {
   az.az_free(p, buf.length);
 }
 
+/// 次の該当シャードを 1 枚落として用例を足す。転送量が大きいので 1 枚ずつ
+async function loadMoreExamples() {
+  if (state.nextDisplay >= state.withHits.length || state.rows.length >= SHOW_MAX) return;
+  const i = state.withHits[state.nextDisplay++];
+  $("more-examples").disabled = true;
+  $("phase").textContent = `用例を取りに行っています(${(manifest.shards[i].bytes / 1e6).toFixed(1)} MB)…`;
+  try {
+    await examplesFrom(i, state.forms);
+  } finally {
+    $("phase").textContent = "";
+    $("more-examples").disabled = false;
+    render();
+  }
+}
+
 async function search() {
   const q = $("q").value.trim();
   if (!q || !az || state.running) return;
@@ -231,6 +251,8 @@ async function search() {
   state.rows = [];
   state.byWork = new Map();
   state.perShard = new Map();
+  state.withHits = [];
+  state.nextDisplay = 0;
   state.total = 0;
   state.scanned = 0;
   state.bytes = 0;
@@ -269,13 +291,12 @@ async function search() {
     }));
     render();
 
-    // 第 2 段 — 用例を組む
-    const withHits = [...state.perShard.keys()].sort((a, b) => a - b);
-    $("phase").textContent = `用例を組んでいます(該当 ${withHits.length} 枚)…`;
-    for (const i of withHits) {
-      if (state.rows.length >= SHOW_MAX) break;
-      await examplesFrom(i, state.forms);
-      render();
+    // 第 2 段 — 用例を組む。まず 1 枚だけ落とす
+    state.withHits = [...state.perShard.keys()].sort((a, b) => a - b);
+    state.nextDisplay = 0;
+    if (state.withHits.length) {
+      $("phase").textContent = "用例を組んでいます…";
+      await loadMoreExamples();
     }
     $("phase").textContent = "";
   } catch (e) {
@@ -309,6 +330,13 @@ function render() {
   $("progress-fill").style.width =
     `${(state.scanned / manifest.shards.length * 100).toFixed(1)}%`;
   $("hit-shards").textContent = state.perShard.size;
+  const rest = state.withHits.length - state.nextDisplay;
+  const btn = $("more-examples");
+  btn.hidden = rest <= 0 || state.rows.length >= SHOW_MAX;
+  if (!btn.hidden) {
+    const next = state.withHits[state.nextDisplay];
+    btn.textContent = `用例をもっと読む(残り ${rest} 枚・次は ${(manifest.shards[next].bytes / 1e6).toFixed(1)} MB)`;
+  }
 
   // 当たった形
   const fw = $("forms");
@@ -481,6 +509,7 @@ async function boot() {
 
   $("run").addEventListener("click", search);
   $("q").addEventListener("keydown", (e) => { if (e.key === "Enter") search(); });
+  $("more-examples").addEventListener("click", loadMoreExamples);
   for (const b of document.querySelectorAll(".chip")) {
     b.addEventListener("click", () => {
       b.setAttribute("aria-pressed", b.getAttribute("aria-pressed") === "true" ? "false" : "true");
